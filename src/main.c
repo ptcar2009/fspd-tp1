@@ -6,6 +6,7 @@
  * NADA SERA EXIBIDO, INFELIZMENTE. :-(
  *****************************************************************/
 
+#include <math.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdio.h>
@@ -14,123 +15,23 @@
 #include <unistd.h>
 
 #include "logs.h"
-#include <math.h>
+#include "mandelbrot.h"
 #include "queue.h"
-
-#ifndef N_THREADS
-#define N_THREADS 9
-#endif
-
-#define MAXX 640
-#define MAXY 480
-#define MAXITER 32768
+#include "threading.h"
 
 int empty_queue = 0;
 queue_t *q, *results;
 
-FILE *input;        // descriptor for the list of tiles (cannot be stdin)
-int color_pick = 5; // decide how to choose the color palette
-
-pthread_mutex_t mq, mr;
 sem_t ssem, osem;
+
+FILE *input;
+int color_pick = 5;
 
 float jobs_per_worker[N_THREADS] = {0};
 
-/****************************************************************
- * Nesta versao, o programa principal le diretamente da entrada
- * a descricao de cada quadrado que deve ser calculado; no EX1,
- * uma thread produtora deve ler essas descricoes sob demanda,
- * para manter uma fila de trabalho abastecida para as threads
- * trabalhadoras.
- ****************************************************************/
-int input_params(fractal_param_t *p)
+void *worker_thread(void *param)
 {
-  int n;
-  n = fscanf(input, "%d %d %d %d", &(p->left), &(p->low), &(p->ires),
-             &(p->jres));
-  if (n == EOF)
-    return n;
-
-  if (n != 4)
-  {
-    perror("fscanf(left,low,ires,jres)");
-    exit(-1);
-  }
-  n = fscanf(input, "%lf %lf %lf %lf", &(p->xmin), &(p->ymin), &(p->xmax),
-             &(p->ymax));
-  if (n != 4)
-  {
-    perror("scanf(xmin,ymin,xmax,ymax)");
-    exit(-1);
-  }
-  return 8;
-}
-struct job_report
-{
-  int worker;
-  float ms;
-};
-
-typedef struct
-{
-  int id;
-} thread_info_t;
-
-/****************************************************************
- * A funcao a seguir faz a geracao dos blocos de imagem dentro
- * da area que vai ser trabalhada pelo programa. Para a versao
- * paralela, nao importa quais as dimensoes totais da area, basta
- * manter um controle de quais blocos estao sendo processados
- * a cada momento, para manter as restricoes desritas no enunciado.
- ****************************************************************/
-// Function to draw mandelbrot set
-void fractal(thread_info_t *info, fractal_param_t *p)
-{
-  double dx, dy;
-  int i, j, k;
-  double x, y, u, v, u2, v2;
-
-  dx = (p->xmax - p->xmin) / p->ires;
-  dy = (p->ymax - p->ymin) / p->jres;
-
-  // scanning every point in that rectangular area.
-  // Each point represents a Complex number (x + yi).
-  // Iterate that complex number
-  for (j = 0; j < p->jres; j++)
-  {
-    for (i = 0; i <= p->ires; i++)
-    {
-      x = i * dx + p->xmin; // c_real
-      u = u2 = 0;           // z_real
-      y = j * dy + p->ymin; // c_imaginary
-      v = v2 = 0;           // z_imaginary
-
-      // Calculate whether c(c_real + c_imaginary) belongs
-      // to the Mandelbrot set or not and draw a pixel
-      // at coordinates (i, j) accordingly
-      // If you reach the Maximum number of iterations
-      // and If the distance from the origin is
-      // greater than 2 exit the loop
-      for (k = 0; (k < MAXITER) && ((u2 + v2) < 4); ++k)
-      {
-        // Calculate Mandelbrot function
-        // z = z*z + c where z is a complex number
-
-        // imag = 2*z_real*z_imaginary + c_imaginary
-        v = 2 * u * v + y;
-        // real = z_real^2 - z_imaginary^2 + c_real
-        u = u2 - v2 + x;
-        u2 = u * u;
-        v2 = v * v;
-      }
-    }
-  }
-}
-
-int n_jobs;
-
-void *ren_thread(void *param)
-{
+  // converting parameters to the known struct
   thread_info_t *info = (thread_info_t *)param;
 
   struct job_report *report;
@@ -145,6 +46,7 @@ void *ren_thread(void *param)
     {
       sem_post(&ssem);
     }
+    // if there are no jobs, increase the number of times there were no jobs
     if (!q->size)
     {
       empty_queue++;
@@ -155,20 +57,17 @@ void *ren_thread(void *param)
     }
 
     DEBUG("worker %d: popping queue", info->id);
-    fractal_param_t *p = queue_t_pop(q);
-    if (!p)
+    fractal_param_t *job = queue_t_pop(q);
+    if (!job)
     {
-      DEBUG("worker %d: ended jobs, ending thread", info->id);
-      queue_unlock(q);
-      free(report);
-      free(info);
-      return NULL;
+
+      break;
     }
 
     jobs_per_worker[info->id]++;
     queue_unlock(q);
-    fractal(info, p);
-    free(p);
+    fractal(job);
+    free(job);
 
     report->ms = ((double)(clock() - start)) / CLOCKS_PER_SEC;
     report->worker = info->id;
@@ -177,35 +76,45 @@ void *ren_thread(void *param)
     queue_t_push(results, report);
     queue_unlock(results);
   }
+  DEBUG("worker %d: ended jobs, ending thread", info->id);
+  queue_unlock(q);
+  free(report);
+  free(info);
+  return NULL;
 }
 
-void *io_thread(void *_)
+void *master_thread(void *_)
 {
   fractal_param_t *p = malloc(sizeof(fractal_param_t));
-
   pthread_t pool[N_THREADS];
+  thread_info_t *info;
+
   // starting worker threads
   for (int i = 0; i < N_THREADS; ++i)
   {
-    thread_info_t *info = malloc(sizeof(thread_info_t));
+    info = malloc(sizeof(thread_info_t));
     info->id = i;
-    pthread_create(pool + i, NULL, ren_thread, info);
+    pthread_create(pool + i, NULL, worker_thread, info);
   }
 
-  while (input_params(p) != EOF)
+  while (input_params(p, input) != EOF)
   {
     INFO("master: adding job to the pool");
     sem_wait(&ssem);
     DEBUG("master: adding job to the queue");
+
+    // acquiring queue lock and adding job to the queue
     queue_lock(q);
     queue_t_push(q, p);
     sem_post(&osem);
     queue_unlock(q);
+
     p = malloc(sizeof(fractal_param_t));
   }
   free(p);
   INFO("master: input ended, signalling workers");
 
+  // adding NULL job descriptors to signalize end of work
   queue_lock(q);
   for (int i = 0; i < N_THREADS; ++i)
   {
@@ -240,8 +149,6 @@ int main(int argc, char *argv[])
   pthread_t io_t;
 
   // mutex and semaphores initialization
-  pthread_mutex_init(&mq, NULL);
-  pthread_mutex_init(&mr, NULL);
   sem_init(&ssem, 0, N_THREADS);
   sem_init(&osem, 0, 0);
 
@@ -251,17 +158,17 @@ int main(int argc, char *argv[])
 
   if ((argc != 2) && (argc != 3))
     FATAL("usage %s filename [color_pick]\n", argv[0]);
-
   if (argc == 3)
     color_pick = atoi(argv[2]);
-
   if ((input = fopen(argv[1], "r")) == NULL)
     FATAL("fopen");
 
   // starting master thread
-  pthread_create(&io_t, NULL, io_thread, NULL);
-
+  pthread_create(&io_t, NULL, master_thread, NULL);
+  // waiting for master thread to finish all jobs
   pthread_join(io_t, NULL);
+
+  // calculating time mean, std and total
 
   double total_time = 0;
   struct queue_node *cur = results->head->next;
@@ -271,9 +178,9 @@ int main(int argc, char *argv[])
     cur = cur->next;
   }
   double total_jobs = results->size;
+
   double std_time = 0;
   double mean_time = total_time / total_jobs;
-
   while (results->size)
   {
     struct job_report *res = queue_t_pop(results);
@@ -283,6 +190,7 @@ int main(int argc, char *argv[])
   }
   std_time = sqrt(std_time / total_jobs);
 
+  // calculating job mean, std and total
   double std_job = 0;
   double mean_jobs = ((double)(total_jobs)) / N_THREADS;
   for (int i = 0; i < N_THREADS; ++i)
@@ -304,8 +212,6 @@ int main(int argc, char *argv[])
   sem_destroy(&ssem);
   queue_t_delete(q);
   queue_t_delete(results);
-  pthread_mutex_destroy(&mq);
-  pthread_mutex_destroy(&mr);
   fclose(input);
   return 0;
 }

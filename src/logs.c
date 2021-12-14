@@ -6,12 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#define LOG_LEVEL_FATAL 0
-#define LOG_LEVEL_ERROR 1
-#define LOG_LEVEL_INFO 2
-#define LOG_LEVEL_DEBUG 3
 
-char *time_stamp() {
+char *time_stamp()
+{
   char *timestamp = (char *)malloc(sizeof(char) * 100);
   time_t ltime;
   ltime = time(NULL);
@@ -23,7 +20,8 @@ char *time_stamp() {
 }
 
 #if (LOG_LEVEL >= LOG_LEVEL_INFO)
-void INFO(char *format, ...) {
+void INFO(char *format, ...)
+{
   va_list args;
   va_start(args, format);
   char *ts = time_stamp();
@@ -34,11 +32,12 @@ void INFO(char *format, ...) {
   va_end(args);
 }
 #else
-void INFO(char *format, ...){};
+inline void INFO(char *format, ...){};
 #endif
 
 #if (LOG_LEVEL >= LOG_LEVEL_DEBUG)
-void DEBUG(char *format, ...) {
+void DEBUG(char *format, ...)
+{
   va_list args;
   va_start(args, format);
   char *ts = time_stamp();
@@ -49,11 +48,12 @@ void DEBUG(char *format, ...) {
   va_end(args);
 }
 #else
-void DEBUG(char *format, ...){};
+inline void DEBUG(char *format, ...){};
 #endif
 
 #if (LOG_LEVEL >= LOG_LEVEL_ERROR)
-void ERROR(char *format, ...) {
+void ERROR(char *format, ...)
+{
   va_list args;
   va_start(args, format);
   char *ts = time_stamp();
@@ -65,11 +65,12 @@ void ERROR(char *format, ...) {
   va_end(args);
 }
 #else
-void ERROR(char *format, ...){};
+inline void ERROR(char *format, ...){};
 #endif
 
 #if (LOG_LEVEL >= LOG_LEVEL_FATAL)
-void FATAL(char *format, ...) {
+void FATAL(char *format, ...)
+{
   va_list args;
   va_start(args, format);
   char *ts = time_stamp();
@@ -82,5 +83,5 @@ void FATAL(char *format, ...) {
   exit(1);
 }
 #else
-void FATAL(char *format, ...){};
+inline void FATAL(char *format, ...){};
 #endif

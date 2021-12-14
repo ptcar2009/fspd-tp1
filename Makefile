@@ -5,7 +5,7 @@ CFLAGS=-I$(IDIR) -DLOG_LEVEL=$(LOG_LEVEL) -Wall -lpthread -g -lm
 SDIR=src
 ODIR=obj
 
-_COMMON_OBJ = queue.o logs.o main.o
+_COMMON_OBJ = queue.o logs.o main.o mandelbrot.o
 COMMON_OBJ=$(patsubst %,$(ODIR)/%,$(_COMMON_OBJ))
 
 
