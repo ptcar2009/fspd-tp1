@@ -1,5 +1,5 @@
 IDIR =inc
-LOG_LEVEL ?= 8
+LOG_LEVEL ?= 0
 CFLAGS=-I$(IDIR) -DLOG_LEVEL=$(LOG_LEVEL) -Wall -lpthread -g -lm
 
 SDIR=src
