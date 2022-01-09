@@ -12,8 +12,10 @@ typedef struct
   int id;
 } thread_info_t;
 
+int get_n_threads();
+
 #ifndef N_THREADS
-#define N_THREADS 9
+#define N_THREADS 1
 #endif
 
 

@@ -10,16 +10,29 @@ COMMON_OBJ=$(patsubst %,$(ODIR)/%,$(_COMMON_OBJ))
 
 
 $(ODIR)/%.o: $(SDIR)/%.c $(DEPS)
+ifdef N_THREADS
+	$(CC) -c -o $@ $< $(CFLAGS) -DN_THREADS=$(N_THREADS)
+else
 	$(CC) -c -o $@ $< $(CFLAGS)
+endif
 
-build: $(COMMON_OBJ)
-	$(CC) -o prog $^ $(CFLAGS) $(LIBS)
+
+build: prog
+
+prog: $(COMMON_OBJ)
+	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
 run: build
 	./prog $(ARGS)
 
-.PHONY: clean
+.PHONY: benchmark
+benchmark: build
+	$(MAKE) clean build
+	hyperfine $(ARGS) 'make run ARGS=bench/test.case'
 
+
+
+.PHONY: clean
 clean:
 	rm -f $(ODIR)/*.o
 	rm -f prog
